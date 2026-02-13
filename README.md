@@ -22,3 +22,8 @@ Open http://127.0.0.1:4173/index.html.
 ## Backlog tracking
 - GitHub Project: https://github.com/users/mashallahmashallah/projects/1
 - Milestone-driven issues track remaining work (WebGPU runtime, AudioWorklet streaming, Safari device runs, and real model artifacts).
+
+
+## ASR harness
+- Added an in-browser Qwen3-ASR compatibility harness in the UI for VoiceDesign samples.
+- Current implementation prioritizes offline reproducibility and benchmark loops while full model-weight runtime integration remains tracked in backlog.

@@ -1,0 +1,26 @@
+name: deploy-pages
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stamp build id for fingerprinting
+        run: |
+          SHA="${GITHUB_SHA}"
+          sed -i "s/__BUILD_ID__/${SHA}/g" index.html sw.js version.json
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - uses: actions/deploy-pages@v4

@@ -1,0 +1,14 @@
+{
+  "name": "supreme-octo-memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 4173",
+    "test:perf": "playwright test",
+    "test": "npm run test:perf"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.51.0"
+  }
+}

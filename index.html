@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="app-build-id" content="__BUILD_ID__" />
+    <title>Mobile In-Browser TTS Lab</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 980px; }
+      textarea { width: 100%; min-height: 120px; }
+      input[type="url"] { width: 100%; }
+      section { border: 1px solid #d9d9d9; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
+      .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { border: 1px solid #e3e3e3; padding: 0.35rem; font-size: 0.9rem; }
+      .status { font-weight: 700; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <h1>Mobile In-Browser TTS Lab</h1>
+
+    <section>
+      <h2>Capabilities</h2>
+      <pre id="capabilities">Running probe…</pre>
+    </section>
+
+    <section>
+      <h2>Model downloads (backgrounded)</h2>
+      <div class="row">
+        <label for="downloadModel">Model</label>
+        <select id="downloadModel"></select>
+        <button id="queueDownloadBtn" type="button">Queue background download</button>
+        <button id="pauseDownloadBtn" type="button">Pause</button>
+        <button id="resumeDownloadBtn" type="button">Resume</button>
+        <button id="cancelDownloadBtn" type="button">Cancel</button>
+      </div>
+      <p class="status" id="downloadStatus">Idle</p>
+      <progress id="downloadProgress" max="1" value="0"></progress>
+      <p id="downloadDetails"></p>
+    </section>
+
+    <section>
+      <h2>Synthesize</h2>
+      <div class="row">
+        <label for="modelSelect">Model</label>
+        <select id="modelSelect"></select>
+        <button id="loadModelBtn" type="button">Load model</button>
+        <button id="synthBtn" type="button">Synthesize</button>
+        <button id="stopBtn" type="button">Stop</button>
+      </div>
+      <label for="inputText">Input text</label>
+      <textarea id="inputText">Nine different, exciting ways of cooking sausage. Incredible. There were three outstanding deliveries in terms of the sausage being the hero. The first dish that we want to dissect, this individual smartly combined different proteins in their sausage. Great seasoning. The blend was absolutely spot on. Congratulations. Please step forward. Natasha.</textarea>
+      <p class="status" id="modelStatus">Model not loaded</p>
+      <p class="status" id="synthStatus">Idle</p>
+    </section>
+
+    <section>
+      <h2>ASR (experimental in-browser worker + compatibility fallback)</h2>
+      <label for="asrAudioUrl">Audio URL</label>
+      <input id="asrAudioUrl" type="url" value="https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-TTS-0115/APS-en_33.wav" />
+      <div class="row">
+        <button id="runAsrBtn" type="button">Run ASR</button>
+      </div>
+      <p class="status" id="asrStatus">Idle</p>
+      <pre class="mono" id="asrOutput"></pre>
+      <p class="status" id="webSpeechStatus">Web Speech STT idle</p>
+      <pre class="mono" id="webSpeechOutput"></pre>
+    </section>
+
+    <section>
+      <h2>Performance</h2>
+      <p id="webVitals">Waiting for first paint metrics…</p>
+      <table>
+        <thead>
+          <tr>
+            <th>Timestamp</th>
+            <th>Mode</th>
+            <th>Model</th>
+            <th>TTFA (ms)</th>
+            <th>Total (ms)</th>
+            <th>RTF</th>
+            <th>Audio</th>
+          </tr>
+        </thead>
+        <tbody id="historyTable"></tbody>
+      </table>
+      <div class="row">
+        <button id="exportBtn" type="button">Export JSON</button>
+        <button id="clearHistoryBtn" type="button">Clear history</button>
+      </div>
+    </section>
+
+    <script type="module" src="./src/app.js?v=__BUILD_ID__"></script>
+  </body>
+</html>

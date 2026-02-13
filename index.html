@@ -8,11 +8,13 @@
     <style>
       body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 980px; }
       textarea { width: 100%; min-height: 120px; }
+      input[type="url"] { width: 100%; }
       section { border: 1px solid #d9d9d9; border-radius: 8px; padding: 0.75rem; margin-bottom: 1rem; }
       .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
       table { width: 100%; border-collapse: collapse; }
       th, td { border: 1px solid #e3e3e3; padding: 0.35rem; font-size: 0.9rem; }
       .status { font-weight: 700; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; }
     </style>
   </head>
   <body>
@@ -51,6 +53,17 @@
       <textarea id="inputText">Nine different, exciting ways of cooking sausage. Incredible. There were three outstanding deliveries in terms of the sausage being the hero. The first dish that we want to dissect, this individual smartly combined different proteins in their sausage. Great seasoning. The blend was absolutely spot on. Congratulations. Please step forward. Natasha.</textarea>
       <p class="status" id="modelStatus">Model not loaded</p>
       <p class="status" id="synthStatus">Idle</p>
+    </section>
+
+    <section>
+      <h2>ASR (Qwen3-ASR compatibility harness)</h2>
+      <label for="asrAudioUrl">Audio URL</label>
+      <input id="asrAudioUrl" type="url" value="https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-TTS-0115/APS-en_33.wav" />
+      <div class="row">
+        <button id="runAsrBtn" type="button">Run ASR</button>
+      </div>
+      <p class="status" id="asrStatus">Idle</p>
+      <pre class="mono" id="asrOutput"></pre>
     </section>
 
     <section>

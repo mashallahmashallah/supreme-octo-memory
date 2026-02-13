@@ -1,25 +1,15 @@
 [
   {
-    "id": "qwen3-tts-12hz-0.6b-customvoice",
-    "name": "Qwen3-TTS-12Hz-0.6B-CustomVoice",
-    "sizeLabel": "~1.2GB",
-    "revision": "v1",
+    "id": "qwen3-tts-12hz-0.6b-base-onnx-speaker-encoder-conv",
+    "name": "Qwen3-TTS-12Hz-0.6B-Base (ONNX speaker encoder conv)",
+    "sizeLabel": "~0.3MB",
+    "revision": "v3",
     "tokenizer": "./public/models/qwen3-tts-0.6b/tokenizer.json",
     "shards": [
-      { "url": "./public/models/qwen3-tts-0.6b/shard-00001.bin", "sha256": "dev" },
-      { "url": "./public/models/qwen3-tts-0.6b/shard-00002.bin", "sha256": "dev" }
-    ]
-  },
-  {
-    "id": "qwen3-tts-12hz-1.7b-voicedesign",
-    "name": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
-    "sizeLabel": "~3.8GB",
-    "revision": "v1",
-    "tokenizer": "./public/models/qwen3-tts-large/tokenizer.json",
-    "shards": [
-      { "url": "./public/models/qwen3-tts-large/shard-00001.bin", "sha256": "dev" },
-      { "url": "./public/models/qwen3-tts-large/shard-00002.bin", "sha256": "dev" },
-      { "url": "./public/models/qwen3-tts-large/shard-00003.bin", "sha256": "dev" }
+      {
+        "url": "./public/models/qwen3-tts-12hz-0.6b-base-onnx/speaker_encoder_conv.onnx",
+        "sha256": "dev"
+      }
     ]
   }
 ]

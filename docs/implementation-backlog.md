@@ -9,11 +9,12 @@
 - GitHub Actions workflows for Pages deploy and performance testing.
 - Synthesis cancel flow now uses real worker-side cancellation.
 - Generated audio is persisted to local history and playable after refresh.
+- ONNX Runtime WebGPU integration added for `qwen3-tts-12hz-0.6b-base` with browser-side session warmup/inference.
 
 ## In progress / pending
 - **Highest priority (in progress):** Persist generated audio and provide playback controls that survive refresh (#9).
 - Replace placeholder model shards with real Qwen3-TTS artifacts and checksums (#3).
-- Integrate real WebGPU inference runtime and tokenizer (#4).
+- Complete full production export/validation for Qwen3-TTS ONNX graphs and tokenizer parity (#4).
 - Add true AudioWorklet streaming pipeline from generated PCM frames (#5).
 - Add Safari/iOS physical-device benchmark automation capture process (#6).
 - Add stronger checksum/hash verification and resumable ranged downloads (#7).

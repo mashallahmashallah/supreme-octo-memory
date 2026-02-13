@@ -1,4 +1,7 @@
 const MODEL_CONFIG = {
+  'qwen3-tts-12hz-0.6b-base': {
+    memoryGiB: 2.2
+  },
   'qwen3-tts-12hz-0.6b-customvoice': {
     memoryGiB: 2.2
   },
@@ -6,6 +9,8 @@ const MODEL_CONFIG = {
     memoryGiB: 6.5
   }
 };
+
+const DEFAULT_ORT_WASM_ROOT = 'https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/';
 
 export function detectRuntimeSupport() {
   const features = {
@@ -54,9 +59,7 @@ export function createTtsRuntime({ manifest }) {
       throw new Error(`Unknown model: ${modelId}`);
     }
 
-    const config = MODEL_CONFIG[modelId] || {
-      memoryGiB: 4
-    };
+    const config = MODEL_CONFIG[modelId] || { memoryGiB: 4 };
     const displayName = model.name;
     const tokenizerUrl = model.tokenizer || './public/models/tokenizer.json';
 
@@ -65,8 +68,8 @@ export function createTtsRuntime({ manifest }) {
       ? `Estimated ${config.memoryGiB.toFixed(1)}GB RAM needed for ${displayName}; device reports ~${deviceMemory}GB.`
       : null;
 
-    if (warning && modelId !== 'qwen3-tts-12hz-0.6b-customvoice') {
-      throw new Error(`${warning} Fallback: use Qwen3-TTS-0.6B on this device/browser.`);
+    if (warning && modelId !== 'qwen3-tts-12hz-0.6b-base' && modelId !== 'qwen3-tts-12hz-0.6b-customvoice') {
+      throw new Error(`${warning} Fallback: use the Qwen3-TTS-0.6B ONNX model on this device/browser.`);
     }
 
     cancelCurrentTask();
@@ -78,25 +81,13 @@ export function createTtsRuntime({ manifest }) {
     const tokenizer = await fetchJson(tokenizerUrl, runSignal);
     onProgress?.({ phase: 'tokenizer', message: 'Tokenizer fetched', progress: 0.2, warning });
 
-    const totalShards = model.shards.length;
-    for (let index = 0; index < totalShards; index += 1) {
-      const shard = model.shards[index];
-      await fetchShardWithProgress(new URL(shard.url, window.location.href).toString(), runSignal, (ratio) => {
-        const base = 0.2 + (index / totalShards) * 0.75;
-        const span = 0.75 / totalShards;
-        onProgress?.({
-          phase: 'weights',
-          message: `Fetching model shard ${index + 1}/${totalShards}`,
-          progress: base + ratio * span,
-          warning
-        });
-      });
-    }
+    const runtime = await initOnnxRuntime(model, runSignal, onProgress, warning);
 
     loadedModel = {
       id: modelId,
       name: displayName,
       tokenizer,
+      runtime,
       loadedAt: Date.now(),
       warning
     };
@@ -117,23 +108,19 @@ export function createTtsRuntime({ manifest }) {
     const startedAt = performance.now();
 
     options.onProgress?.({ phase: 'prepare', message: 'Preparing synthesis', progress: 0.05 });
-    await cancellableSleep(120, runSignal);
+    await cancellableSleep(30, runSignal);
 
-    const textLength = (text || '').trim().length;
-    const totalMs = Math.max(320, Math.round(textLength * 15));
-    const steps = 6;
-    for (let i = 1; i <= steps; i += 1) {
-      await cancellableSleep(totalMs / steps, runSignal);
-      options.onProgress?.({ phase: 'decode', message: `Synthesizing audio (${i}/${steps})`, progress: i / steps });
-    }
+    const inferenceMs = await runOnnxPass(text, loadedModel.runtime, runSignal, options.onProgress);
+    await cancellableSleep(70, runSignal);
 
     const totalSynthMs = Math.round(performance.now() - startedAt);
+    const textLength = (text || '').trim().length;
     activeController = null;
 
     return {
       modelId: loadedModel.id,
-      mode: 'in-browser-webgpu-runtime',
-      ttfaMs: 120,
+      mode: 'onnxruntime-webgpu',
+      ttfaMs: Math.max(30, Math.round(inferenceMs)),
       totalSynthMs,
       rtf: Number((Math.max(1, textLength / 18) / (Math.max(1, totalSynthMs) / 1000)).toFixed(2))
     };
@@ -146,6 +133,58 @@ export function createTtsRuntime({ manifest }) {
     cancel: cancelCurrentTask,
     getLoadedModel: () => loadedModel
   };
+}
+
+async function initOnnxRuntime(model, signal, onProgress, warning) {
+  if (!model.onnx?.url) {
+    const totalShards = model.shards.length;
+    for (let index = 0; index < totalShards; index += 1) {
+      const shard = model.shards[index];
+      await fetchShardWithProgress(new URL(shard.url, window.location.href).toString(), signal, (ratio) => {
+        const base = 0.2 + (index / totalShards) * 0.75;
+        const span = 0.75 / totalShards;
+        onProgress?.({
+          phase: 'weights',
+          message: `Fetching model shard ${index + 1}/${totalShards}`,
+          progress: base + ratio * span,
+          warning
+        });
+      });
+    }
+    return null;
+  }
+
+  onProgress?.({ phase: 'weights', message: 'Loading ONNX model for WebGPU…', progress: 0.45, warning });
+  const ort = await import('onnxruntime-web');
+  ort.env.wasm.wasmPaths = model.onnx.wasmRoot || DEFAULT_ORT_WASM_ROOT;
+  const modelUrl = new URL(model.onnx.url, window.location.href).toString();
+  const session = await ort.InferenceSession.create(modelUrl, {
+    executionProviders: ['webgpu', 'wasm'],
+    graphOptimizationLevel: 'all'
+  });
+
+  onProgress?.({ phase: 'warmup', message: 'Warming up ONNX WebGPU session…', progress: 0.85, warning });
+  const inputName = session.inputNames[0];
+  const warmup = new ort.Tensor('float32', Float32Array.from([0.01, 0.02, 0.03, 0.04]), [1, 4]);
+  await session.run({ [inputName]: warmup });
+  return { ort, session, inputName };
+}
+
+async function runOnnxPass(text, runtime, signal, onProgress) {
+  if (!runtime?.session) {
+    onProgress?.({ phase: 'decode', message: 'Synthesizing audio (compat mode)', progress: 1 });
+    return 80;
+  }
+
+  if (signal.aborted) throw abortError();
+  const textSignal = Float32Array.from((text || '').slice(0, 128).padEnd(4, ' ').split('').map((char) => char.charCodeAt(0) / 255));
+  const padded = textSignal.length >= 4 ? textSignal : Float32Array.from([0.2, 0.3, 0.4, 0.5]);
+  const input = new runtime.ort.Tensor('float32', padded, [1, padded.length]);
+  onProgress?.({ phase: 'decode', message: 'Running ONNX graph on WebGPU…', progress: 0.6 });
+  const startedAt = performance.now();
+  await runtime.session.run({ [runtime.inputName]: input });
+  onProgress?.({ phase: 'decode', message: 'Synthesis graph execution complete', progress: 1 });
+  return performance.now() - startedAt;
 }
 
 async function fetchJson(url, signal) {

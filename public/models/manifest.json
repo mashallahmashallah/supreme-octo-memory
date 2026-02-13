@@ -5,8 +5,8 @@
     "sizeLabel": "~1.2GB",
     "revision": "v1",
     "shards": [
-      { "url": "./public/models/qwen3-tts-0.6b/shard-00001.bin", "sha256": "dev" },
-      { "url": "./public/models/qwen3-tts-0.6b/shard-00002.bin", "sha256": "dev" }
+      { "url": "./public/models/qwen3-tts-0.6b/shard-00001.bin", "sha256": "11c6fdab04fc28a70133ca10b770e3dbc04e57863332067b461726883e7979ad" },
+      { "url": "./public/models/qwen3-tts-0.6b/shard-00002.bin", "sha256": "5db9ee4c32cdd455961c32df41ac97513e2dede184df460de8933baffc33b377" }
     ]
   },
   {
@@ -15,9 +15,9 @@
     "sizeLabel": "~3.8GB",
     "revision": "v1",
     "shards": [
-      { "url": "./public/models/qwen3-tts-large/shard-00001.bin", "sha256": "dev" },
-      { "url": "./public/models/qwen3-tts-large/shard-00002.bin", "sha256": "dev" },
-      { "url": "./public/models/qwen3-tts-large/shard-00003.bin", "sha256": "dev" }
+      { "url": "./public/models/qwen3-tts-large/shard-00001.bin", "sha256": "8c1fa3a8e2abfcc8693c02f47368dcef515eb4d4ebbbd361d00aea21d842a830" },
+      { "url": "./public/models/qwen3-tts-large/shard-00002.bin", "sha256": "de4d2133c11be34f27a54709ea96f093f558ead1a1612d8135430639d579365c" },
+      { "url": "./public/models/qwen3-tts-large/shard-00003.bin", "sha256": "934e7e3890bd7220721faa90249af232f70bed785cbd2ce7301ecf011474ccb4" }
     ]
   }
 ]

@@ -74,3 +74,24 @@ test('synthesis can be cancelled without JS errors', async ({ page }) => {
   await expect(page.locator('#stopBtn')).toBeDisabled();
   expect(jsErrors).toEqual([]);
 });
+
+test('downloads can pause resume and complete without JS errors', async ({ page }) => {
+  const jsErrors = [];
+  page.on('pageerror', (error) => jsErrors.push(`pageerror: ${error.message}`));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') {
+      jsErrors.push(`console: ${msg.text()}`);
+    }
+  });
+
+  await page.goto('/index.html', { waitUntil: 'load' });
+  await page.click('#queueDownloadBtn');
+  await page.click('#pauseDownloadBtn');
+  await expect(page.locator('#downloadStatus')).toContainText('Paused');
+  await page.click('#resumeDownloadBtn');
+
+  await expect(page.locator('#downloadStatus')).toContainText('Model ready', { timeout: 6000 });
+  const progress = await page.locator('#downloadProgress').evaluate((element) => Number(element.value));
+  expect(progress).toBeGreaterThanOrEqual(1);
+  expect(jsErrors).toEqual([]);
+});

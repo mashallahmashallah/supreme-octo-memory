@@ -1,13 +1,9 @@
 const MODEL_CONFIG = {
   'qwen3-tts-12hz-0.6b-customvoice': {
-    displayName: 'Qwen3-TTS-0.6B',
-    memoryGiB: 2.2,
-    tokenizerUrl: './public/models/qwen3-tts-0.6b/tokenizer.json'
+    memoryGiB: 2.2
   },
   'qwen3-tts-12hz-1.7b-voicedesign': {
-    displayName: 'Qwen3-TTS-Large',
-    memoryGiB: 6.5,
-    tokenizerUrl: './public/models/qwen3-tts-large/tokenizer.json'
+    memoryGiB: 6.5
   }
 };
 
@@ -59,14 +55,14 @@ export function createTtsRuntime({ manifest }) {
     }
 
     const config = MODEL_CONFIG[modelId] || {
-      displayName: model.name,
-      memoryGiB: 4,
-      tokenizerUrl: './public/models/tokenizer.json'
+      memoryGiB: 4
     };
+    const displayName = model.name;
+    const tokenizerUrl = model.tokenizer || './public/models/tokenizer.json';
 
     const deviceMemory = navigator.deviceMemory || null;
     const warning = deviceMemory && deviceMemory < config.memoryGiB
-      ? `Estimated ${config.memoryGiB.toFixed(1)}GB RAM needed for ${config.displayName}; device reports ~${deviceMemory}GB.`
+      ? `Estimated ${config.memoryGiB.toFixed(1)}GB RAM needed for ${displayName}; device reports ~${deviceMemory}GB.`
       : null;
 
     if (warning && modelId !== 'qwen3-tts-12hz-0.6b-customvoice') {
@@ -77,9 +73,9 @@ export function createTtsRuntime({ manifest }) {
     activeController = new AbortController();
     const runSignal = mergeAbortSignals(activeController.signal, signal);
 
-    onProgress?.({ phase: 'init', message: `Initializing ${config.displayName}…`, progress: 0.02, warning });
+    onProgress?.({ phase: 'init', message: `Initializing ${displayName}…`, progress: 0.02, warning });
 
-    const tokenizer = await fetchJson(config.tokenizerUrl, runSignal);
+    const tokenizer = await fetchJson(tokenizerUrl, runSignal);
     onProgress?.({ phase: 'tokenizer', message: 'Tokenizer fetched', progress: 0.2, warning });
 
     const totalShards = model.shards.length;
@@ -99,13 +95,13 @@ export function createTtsRuntime({ manifest }) {
 
     loadedModel = {
       id: modelId,
-      name: config.displayName,
+      name: displayName,
       tokenizer,
       loadedAt: Date.now(),
       warning
     };
 
-    onProgress?.({ phase: 'ready', message: `${config.displayName} ready`, progress: 1, warning });
+    onProgress?.({ phase: 'ready', message: `${displayName} ready`, progress: 1, warning });
     activeController = null;
     return loadedModel;
   }

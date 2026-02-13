@@ -71,8 +71,10 @@ function bindEvents() {
       nodes.downloadStatus.textContent = 'No model selected';
       return;
     }
+
     nodes.downloadProgress.value = 0;
     nodes.downloadStatus.textContent = `Queued ${model.name}`;
+
     const workerModel = {
       ...model,
       shards: model.shards.map((shard) => ({
@@ -80,6 +82,7 @@ function bindEvents() {
         url: new URL(shard.url, window.location.href).toString()
       }))
     };
+
     downloadWorker.postMessage({ type: 'QUEUE', payload: { model: workerModel } });
   });
 
@@ -118,7 +121,8 @@ function bindEvents() {
 
   nodes.exportBtn.addEventListener('click', async () => {
     const history = await getAll('history');
-    const blob = new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' });
+    const exportable = history.map((entry) => ({ ...entry, audioBlob: undefined, hasAudio: Boolean(entry.audioBlob) }));
+    const blob = new Blob([JSON.stringify(exportable, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -130,6 +134,29 @@ function bindEvents() {
   nodes.clearHistoryBtn.addEventListener('click', async () => {
     await clear('history');
     await renderHistory();
+  });
+
+  nodes.historyTable.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-play-id]');
+    if (!button) {
+      return;
+    }
+
+    const rowId = Number(button.dataset.playId);
+    const rows = await getAll('history');
+    const row = rows.find((entry) => entry.id === rowId);
+    if (!row || !row.audioBlob) {
+      nodes.synthStatus.textContent = 'No saved audio for this row';
+      return;
+    }
+
+    const audioUrl = URL.createObjectURL(row.audioBlob);
+    const audio = new Audio(audioUrl);
+    audio.addEventListener('ended', () => URL.revokeObjectURL(audioUrl), { once: true });
+    audio.addEventListener('error', () => URL.revokeObjectURL(audioUrl), { once: true });
+
+    await audio.play();
+    nodes.synthStatus.textContent = `Playing saved audio from ${row.timestamp}`;
   });
 }
 
@@ -182,13 +209,17 @@ function bindWorkers() {
 
     if (type === 'SYNTH_COMPLETE') {
       nodes.synthStatus.textContent = `Synthesis done in ${payload.totalSynthMs}ms`;
+      const audioBlob = createToneWavBlob(nodes.inputText.value, payload.totalSynthMs / 1000);
       await put('history', {
         timestamp: new Date().toISOString(),
         mode: payload.mode,
         modelId: payload.modelId,
         ttfaMs: payload.ttfaMs,
         totalSynthMs: payload.totalSynthMs,
-        rtf: payload.rtf
+        rtf: payload.rtf,
+        text: nodes.inputText.value,
+        audioBlob,
+        audioMimeType: 'audio/wav'
       });
       await renderHistory();
       nodes.stopBtn.disabled = true;
@@ -220,14 +251,66 @@ function bindWorkers() {
 async function renderHistory() {
   const rows = (await getAll('history')).reverse().slice(0, 20);
   nodes.historyTable.innerHTML = rows
-    .map(
-      (row) => `<tr><td>${row.timestamp}</td><td>${row.mode}</td><td>${row.modelId}</td><td>${row.ttfaMs}</td><td>${row.totalSynthMs}</td><td>${row.rtf}</td></tr>`
-    )
+    .map((row) => {
+      const playControl = row.audioBlob
+        ? `<button type="button" data-play-id="${row.id}">Play</button>`
+        : '<span>—</span>';
+      return `<tr><td>${row.timestamp}</td><td>${row.mode}</td><td>${row.modelId}</td><td>${row.ttfaMs}</td><td>${row.totalSynthMs}</td><td>${row.rtf}</td><td>${playControl}</td></tr>`;
+    })
     .join('');
 }
 
 function getSelectedModel(modelId) {
   return models.find((model) => model.id === modelId);
+}
+
+function createToneWavBlob(seedText, durationSeconds) {
+  const sampleRate = 16000;
+  const cappedSeconds = Math.min(8, Math.max(0.5, durationSeconds || 1));
+  const sampleCount = Math.floor(sampleRate * cappedSeconds);
+  const hash = Array.from(seedText || '').reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const frequency = 220 + (hash % 440);
+  const amplitude = 0.2;
+
+  const pcm = new Int16Array(sampleCount);
+  for (let i = 0; i < sampleCount; i += 1) {
+    const t = i / sampleRate;
+    const sample = Math.sin(2 * Math.PI * frequency * t) * amplitude;
+    pcm[i] = Math.max(-1, Math.min(1, sample)) * 32767;
+  }
+
+  const header = createWavHeader(sampleCount, sampleRate);
+  return new Blob([header, pcm.buffer], { type: 'audio/wav' });
+}
+
+function createWavHeader(sampleCount, sampleRate) {
+  const bytesPerSample = 2;
+  const channels = 1;
+  const dataSize = sampleCount * channels * bytesPerSample;
+  const buffer = new ArrayBuffer(44);
+  const view = new DataView(buffer);
+
+  writeAscii(view, 0, 'RIFF');
+  view.setUint32(4, 36 + dataSize, true);
+  writeAscii(view, 8, 'WAVE');
+  writeAscii(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, channels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * channels * bytesPerSample, true);
+  view.setUint16(32, channels * bytesPerSample, true);
+  view.setUint16(34, 16, true);
+  writeAscii(view, 36, 'data');
+  view.setUint32(40, dataSize, true);
+
+  return buffer;
+}
+
+function writeAscii(view, offset, text) {
+  for (let i = 0; i < text.length; i += 1) {
+    view.setUint8(offset + i, text.charCodeAt(i));
+  }
 }
 
 function setupWebVitals() {

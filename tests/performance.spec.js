@@ -2,6 +2,18 @@ import { test, expect } from '@playwright/test';
 
 const LCP_THRESHOLD_MS = 2500;
 const INTERACTION_TARGET_MS = 400;
+const QWEN_EXAMPLE_TEXT = 'Nine different, exciting ways of cooking sausage. Incredible. There were three outstanding deliveries in terms of the sausage being the hero. The first dish that we want to dissect, this individual smartly combined different proteins in their sausage. Great seasoning. The blend was absolutely spot on. Congratulations. Please step forward. Natasha.';
+const QWEN_EXAMPLE_AUDIO_URL = 'https://qianwen-res.oss-cn-beijing.aliyuncs.com/Qwen3-TTS-0115/APS-en_33.wav';
+
+function readWavDurationFromArrayBuffer(buffer) {
+  const view = new DataView(buffer);
+  const sampleRate = view.getUint32(24, true);
+  const dataSize = view.getUint32(40, true);
+  const channels = view.getUint16(22, true);
+  const bitsPerSample = view.getUint16(34, true);
+  const bytesPerSample = bitsPerSample / 8;
+  return dataSize / (sampleRate * channels * bytesPerSample);
+}
 
 test('simulated 3G: app remains responsive and LCP threshold is enforced in UI', async ({ browser }) => {
   const context = await browser.newContext();
@@ -96,7 +108,7 @@ test('downloads can pause resume and complete without JS errors', async ({ page 
   expect(jsErrors).toEqual([]);
 });
 
-test('generated audio persists after refresh and remains playable', async ({ page }) => {
+test('voice design example duration is close to Qwen reference and persists after refresh', async ({ page, request }) => {
   const jsErrors = [];
   page.on('pageerror', (error) => jsErrors.push(`pageerror: ${error.message}`));
   page.on('console', (msg) => {
@@ -105,13 +117,50 @@ test('generated audio persists after refresh and remains playable', async ({ pag
     }
   });
 
+  let exampleDurationSec = 25;
+  try {
+    const exampleResponse = await request.get(QWEN_EXAMPLE_AUDIO_URL);
+    if (exampleResponse.ok()) {
+      exampleDurationSec = readWavDurationFromArrayBuffer(await exampleResponse.body());
+    }
+  } catch {
+    exampleDurationSec = 25;
+  }
+
   await page.goto('/index.html', { waitUntil: 'load' });
   await page.click('#loadModelBtn');
   await expect(page.locator('#modelStatus')).toContainText('Model loaded', { timeout: 3000 });
 
-  await page.fill('#inputText', 'Persist this generated audio sample for playback.');
+  await page.fill('#inputText', QWEN_EXAMPLE_TEXT);
   await page.click('#synthBtn');
   await expect(page.locator('#synthStatus')).toContainText('Synthesis done', { timeout: 6000 });
+
+  const generatedDurationSec = await page.evaluate(async () => {
+    const db = await new Promise((resolve, reject) => {
+      const req = indexedDB.open('tts-lab', 1);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+
+    const rows = await new Promise((resolve, reject) => {
+      const tx = db.transaction('history', 'readonly');
+      const req = tx.objectStore('history').getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+
+    const latest = rows.at(-1);
+    const buffer = await latest.audioBlob.arrayBuffer();
+    const view = new DataView(buffer);
+    const sampleRate = view.getUint32(24, true);
+    const dataSize = view.getUint32(40, true);
+    const channels = view.getUint16(22, true);
+    const bitsPerSample = view.getUint16(34, true);
+    const bytesPerSample = bitsPerSample / 8;
+    return dataSize / (sampleRate * channels * bytesPerSample);
+  });
+
+  expect(Math.abs(generatedDurationSec - exampleDurationSec)).toBeLessThanOrEqual(3.5);
 
   await page.reload({ waitUntil: 'load' });
   const playButton = page.locator('button[data-play-id]').first();

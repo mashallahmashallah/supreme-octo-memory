@@ -1,4 +1,5 @@
 let loadedModel = null;
+let activeSynthesisToken = 0;
 
 self.onmessage = async (event) => {
   const { type, payload } = event.data;
@@ -10,17 +11,34 @@ self.onmessage = async (event) => {
     postMessage({ type: 'MODEL_READY', payload: { modelId: loadedModel, loadMs: performance.now() - start } });
   }
 
+  if (type === 'CANCEL') {
+    activeSynthesisToken += 1;
+    postMessage({ type: 'SYNTH_CANCELLED' });
+  }
+
   if (type === 'SYNTHESIZE') {
-    const start = performance.now();
     if (!loadedModel) {
       postMessage({ type: 'ERROR', payload: 'Model not loaded' });
       return;
     }
-    await sleep(120);
+
+    const runToken = ++activeSynthesisToken;
+    const start = performance.now();
+
+    await cancellableSleep(120, runToken);
+    if (runToken !== activeSynthesisToken) {
+      return;
+    }
+
     const ttfa = performance.now() - start;
-    const textLength = payload.text.length;
+    const textLength = (payload.text || '').length;
     const totalMs = Math.max(300, Math.round(textLength * 16));
-    await sleep(totalMs);
+    await cancellableSleep(totalMs, runToken);
+
+    if (runToken !== activeSynthesisToken) {
+      return;
+    }
+
     postMessage({
       type: 'SYNTH_COMPLETE',
       payload: {
@@ -33,6 +51,17 @@ self.onmessage = async (event) => {
     });
   }
 };
+
+async function cancellableSleep(ms, runToken) {
+  const chunkMs = 50;
+  const endAt = performance.now() + ms;
+  while (performance.now() < endAt) {
+    if (runToken !== activeSynthesisToken) {
+      return;
+    }
+    await sleep(Math.min(chunkMs, endAt - performance.now()));
+  }
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));

@@ -1,0 +1,6 @@
+{
+  "model": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
+  "version": "v1",
+  "type": "bpe",
+  "note": "Demo tokenizer metadata for in-browser runtime bootstrap"
+}

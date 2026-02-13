@@ -4,6 +4,7 @@
     "name": "Qwen3-TTS-12Hz-0.6B-CustomVoice",
     "sizeLabel": "~1.2GB",
     "revision": "v1",
+    "tokenizer": "./public/models/qwen3-tts-0.6b/tokenizer.json",
     "shards": [
       { "url": "./public/models/qwen3-tts-0.6b/shard-00001.bin", "sha256": "dev" },
       { "url": "./public/models/qwen3-tts-0.6b/shard-00002.bin", "sha256": "dev" }
@@ -14,6 +15,7 @@
     "name": "Qwen3-TTS-12Hz-1.7B-VoiceDesign",
     "sizeLabel": "~3.8GB",
     "revision": "v1",
+    "tokenizer": "./public/models/qwen3-tts-large/tokenizer.json",
     "shards": [
       { "url": "./public/models/qwen3-tts-large/shard-00001.bin", "sha256": "dev" },
       { "url": "./public/models/qwen3-tts-large/shard-00002.bin", "sha256": "dev" },

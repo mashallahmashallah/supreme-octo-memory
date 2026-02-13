@@ -1,0 +1,23 @@
+[
+  {
+    "id": "qwen3-tts-0.6b",
+    "name": "Qwen3-TTS-0.6B",
+    "sizeLabel": "~1.2GB",
+    "revision": "v1",
+    "shards": [
+      { "url": "./public/models/qwen3-tts-0.6b/shard-00001.bin", "sha256": "dev" },
+      { "url": "./public/models/qwen3-tts-0.6b/shard-00002.bin", "sha256": "dev" }
+    ]
+  },
+  {
+    "id": "qwen3-tts-large",
+    "name": "Qwen3-TTS-Large",
+    "sizeLabel": "~3.8GB",
+    "revision": "v1",
+    "shards": [
+      { "url": "./public/models/qwen3-tts-large/shard-00001.bin", "sha256": "dev" },
+      { "url": "./public/models/qwen3-tts-large/shard-00002.bin", "sha256": "dev" },
+      { "url": "./public/models/qwen3-tts-large/shard-00003.bin", "sha256": "dev" }
+    ]
+  }
+]

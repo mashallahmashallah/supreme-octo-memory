@@ -1,0 +1,6 @@
+{
+  "model": "Qwen3-TTS-Large",
+  "version": "v1",
+  "type": "bpe",
+  "note": "Demo tokenizer metadata for in-browser runtime bootstrap"
+}

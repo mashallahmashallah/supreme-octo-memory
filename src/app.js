@@ -1,5 +1,6 @@
 import { probeCapabilities } from './capabilities.js';
 import { clear, getAll, put } from './storage/db.js';
+import { createTtsRuntime, detectRuntimeSupport } from './tts/runtime.js';
 
 const LCP_THRESHOLD_MS = 2500;
 const FIRST_INTERACTION_TARGET_MS = 400;
@@ -18,6 +19,7 @@ const QWEN_ASR_REFERENCE_TRANSCRIPTS = {
 
 const nodes = {
   capabilities: document.querySelector('#capabilities'),
+  runtimeIssues: document.querySelector('#runtimeIssues'),
   downloadModel: document.querySelector('#downloadModel'),
   queueDownloadBtn: document.querySelector('#queueDownloadBtn'),
   pauseDownloadBtn: document.querySelector('#pauseDownloadBtn'),
@@ -44,16 +46,21 @@ const nodes = {
 };
 
 const downloadWorker = new Worker('./src/workers/download.worker.js', { type: 'module' });
-const ttsWorker = new Worker('./src/workers/tts.worker.js', { type: 'module' });
 const asrWorker = new Worker('./src/workers/asr.worker.js', { type: 'module' });
 let models = [];
+let ttsRuntime = null;
 
 init();
 
 async function init() {
-  nodes.capabilities.textContent = JSON.stringify(probeCapabilities(), null, 2);
+  const support = detectRuntimeSupport();
+  nodes.capabilities.textContent = JSON.stringify({ ...probeCapabilities(), missingForTts: support.missing }, null, 2);
+  nodes.runtimeIssues.textContent = support.supported
+    ? 'In-browser runtime support is available.'
+    : `In-browser runtime unavailable: ${support.missing.join(', ')}`;
   nodes.synthBtn.disabled = true;
   nodes.stopBtn.disabled = true;
+  nodes.loadModelBtn.disabled = !support.supported;
 
   try {
     const response = await fetch('./public/models/manifest.json');
@@ -68,6 +75,8 @@ async function init() {
     nodes.downloadModel.add(new Option(label, model.id));
     nodes.modelSelect.add(new Option(label, model.id));
   }
+
+  ttsRuntime = createTtsRuntime({ manifest: models });
 
   bindEvents();
   bindWorkers();
@@ -97,7 +106,30 @@ function bindEvents() {
   nodes.loadModelBtn.addEventListener('click', () => {
     nodes.modelStatus.textContent = 'Model loading…';
     nodes.loadModelBtn.disabled = true;
-    ttsWorker.postMessage({ type: 'INIT_MODEL', payload: { modelId: nodes.modelSelect.value } });
+    nodes.stopBtn.disabled = false;
+    ttsRuntime
+      .loadModel(nodes.modelSelect.value, {
+        onProgress: ({ message, progress, warning }) => {
+          nodes.modelStatus.textContent = warning ? `${message} (${warning})` : message;
+          if (typeof progress === 'number') {
+            nodes.downloadProgress.value = progress;
+          }
+        }
+      })
+      .then((result) => {
+        nodes.modelStatus.textContent = result.warning
+          ? `Model loaded with warning: ${result.warning}`
+          : `Model loaded: ${result.name}`;
+        nodes.loadModelBtn.disabled = false;
+        nodes.synthBtn.disabled = false;
+        nodes.stopBtn.disabled = true;
+      })
+      .catch((error) => {
+        nodes.modelStatus.textContent = error.name === 'AbortError' ? 'Model loading cancelled' : String(error.message || error);
+        nodes.loadModelBtn.disabled = false;
+        nodes.synthBtn.disabled = true;
+        nodes.stopBtn.disabled = true;
+      });
   });
 
   nodes.synthBtn.addEventListener('click', () => {
@@ -105,7 +137,43 @@ function bindEvents() {
     nodes.synthStatus.textContent = 'Synthesis running…';
     nodes.synthBtn.disabled = true;
     nodes.stopBtn.disabled = false;
-    ttsWorker.postMessage({ type: 'SYNTHESIZE', payload: { text: nodes.inputText.value } });
+    ttsRuntime
+      .synthesize(nodes.inputText.value, {
+        onProgress: ({ message }) => {
+          nodes.synthStatus.textContent = message;
+        }
+      })
+      .then(async (payload) => {
+        const durationSec = estimateSpeechDurationSeconds(nodes.inputText.value);
+        const { blob: audioBlob, stats } = createPseudoSpeechWavBlob(nodes.inputText.value, durationSec);
+
+        nodes.synthStatus.textContent = `Synthesis done in ${payload.totalSynthMs}ms`;
+        const asrTranscript = nodes.inputText.value;
+
+        await put('history', {
+          timestamp: new Date().toISOString(),
+          mode: payload.mode,
+          modelId: payload.modelId,
+          ttfaMs: payload.ttfaMs,
+          totalSynthMs: payload.totalSynthMs,
+          rtf: payload.rtf,
+          text: nodes.inputText.value,
+          audioBlob,
+          audioMimeType: 'audio/wav',
+          audioDurationSec: durationSec,
+          signalStats: stats,
+          asrTranscript
+        });
+
+        await renderHistory();
+        nodes.synthBtn.disabled = false;
+        nodes.stopBtn.disabled = true;
+      })
+      .catch((error) => {
+        nodes.synthStatus.textContent = error.name === 'AbortError' ? 'Synthesis cancelled' : String(error.message || error);
+        nodes.synthBtn.disabled = false;
+        nodes.stopBtn.disabled = true;
+      });
 
     const interaction = Math.round(performance.now() - startedAt);
     if (interaction > FIRST_INTERACTION_TARGET_MS) {
@@ -113,7 +181,11 @@ function bindEvents() {
     }
   });
 
-  nodes.stopBtn.addEventListener('click', () => ttsWorker.postMessage({ type: 'CANCEL' }));
+  nodes.stopBtn.addEventListener('click', () => {
+    ttsRuntime.cancel();
+    nodes.synthStatus.textContent = 'Cancellation requested…';
+    nodes.loadModelBtn.disabled = false;
+  });
 
   nodes.runAsrBtn.addEventListener('click', async () => {
     const audioUrl = nodes.asrAudioUrl.value.trim();
@@ -174,51 +246,6 @@ function bindWorkers() {
     if (type === 'COMPLETE') {
       nodes.downloadStatus.textContent = 'Model ready';
       await put('downloads', { id: payload, updatedAt: new Date().toISOString(), ready: true });
-    }
-  };
-
-  ttsWorker.onmessage = async (event) => {
-    const { type, payload } = event.data;
-
-    if (type === 'MODEL_READY') {
-      nodes.modelStatus.textContent = `Model loaded in ${Math.round(payload.loadMs)}ms`;
-      nodes.loadModelBtn.disabled = false;
-      nodes.synthBtn.disabled = false;
-      return;
-    }
-
-    if (type === 'SYNTH_CANCELLED') {
-      nodes.synthStatus.textContent = 'Synthesis cancelled';
-      nodes.synthBtn.disabled = false;
-      nodes.stopBtn.disabled = true;
-      return;
-    }
-
-    if (type === 'SYNTH_COMPLETE') {
-      const durationSec = estimateSpeechDurationSeconds(nodes.inputText.value);
-      const { blob: audioBlob, stats } = createPseudoSpeechWavBlob(nodes.inputText.value, durationSec);
-
-      nodes.synthStatus.textContent = `Synthesis done in ${payload.totalSynthMs}ms`;
-      const asrTranscript = nodes.inputText.value;
-
-      await put('history', {
-        timestamp: new Date().toISOString(),
-        mode: payload.mode,
-        modelId: payload.modelId,
-        ttfaMs: payload.ttfaMs,
-        totalSynthMs: payload.totalSynthMs,
-        rtf: payload.rtf,
-        text: nodes.inputText.value,
-        audioBlob,
-        audioMimeType: 'audio/wav',
-        audioDurationSec: durationSec,
-        signalStats: stats,
-        asrTranscript
-      });
-
-      await renderHistory();
-      nodes.synthBtn.disabled = false;
-      nodes.stopBtn.disabled = true;
     }
   };
 

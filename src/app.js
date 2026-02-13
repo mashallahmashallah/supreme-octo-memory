@@ -1,6 +1,17 @@
 import { probeCapabilities } from './capabilities.js';
 import { clear, getAll, put } from './storage/db.js';
 import { createTtsRuntime, detectRuntimeSupport } from './tts/runtime.js';
+import {
+  deleteModelCache,
+  getModelCacheUsage,
+  invalidateChangedModels
+} from './storage/model-cache.js';
+import {
+  loadRecentBenchmarkRuns,
+  loadRecentPrompts,
+  saveBenchmarkRun,
+  savePrompt
+} from './storage/session-state.js';
 
 const LCP_THRESHOLD_MS = 2500;
 const FIRST_INTERACTION_TARGET_MS = 400;
@@ -42,7 +53,11 @@ const nodes = {
   webVitals: document.querySelector('#webVitals'),
   historyTable: document.querySelector('#historyTable'),
   exportBtn: document.querySelector('#exportBtn'),
-  clearHistoryBtn: document.querySelector('#clearHistoryBtn')
+  clearHistoryBtn: document.querySelector('#clearHistoryBtn'),
+  preloadModelBtn: document.querySelector('#preloadModelBtn'),
+  deleteModelCacheBtn: document.querySelector('#deleteModelCacheBtn'),
+  storageEstimateBtn: document.querySelector('#storageEstimateBtn'),
+  storageStatus: document.querySelector('#storageStatus')
 };
 
 const downloadWorker = new Worker('./src/workers/download.worker.js', { type: 'module' });
@@ -65,6 +80,7 @@ async function init() {
   try {
     const response = await fetch('./public/models/manifest.json');
     models = await response.json();
+    await invalidateChangedModels(models);
   } catch (error) {
     nodes.downloadStatus.textContent = `Unable to load model manifest: ${String(error)}`;
     return;
@@ -80,6 +96,7 @@ async function init() {
 
   bindEvents();
   bindWorkers();
+  await restoreSessionState();
   await renderHistory();
   setupWebVitals();
   await registerServiceWorker();
@@ -89,14 +106,24 @@ function bindEvents() {
   nodes.queueDownloadBtn.addEventListener('click', () => {
     const model = models.find((item) => item.id === nodes.downloadModel.value);
     if (!model) return;
+    queueModelDownload(model, 'QUEUE');
+  });
 
-    const workerModel = {
-      ...model,
-      shards: model.shards.map((shard) => ({ ...shard, url: new URL(shard.url, window.location.href).toString() }))
-    };
+  nodes.preloadModelBtn?.addEventListener('click', () => {
+    const model = models.find((item) => item.id === nodes.downloadModel.value);
+    if (!model) return;
+    queueModelDownload(model, 'PRELOAD_MODEL');
+  });
 
-    nodes.downloadProgress.value = 0;
-    downloadWorker.postMessage({ type: 'QUEUE', payload: { model: workerModel } });
+  nodes.deleteModelCacheBtn?.addEventListener('click', async () => {
+    const modelId = nodes.downloadModel.value;
+    if (!modelId) return;
+    await deleteModelCache(modelId);
+    nodes.storageStatus.textContent = `Deleted cache for ${modelId}`;
+  });
+
+  nodes.storageEstimateBtn?.addEventListener('click', async () => {
+    await renderStorageEstimate();
   });
 
   nodes.pauseDownloadBtn.addEventListener('click', () => downloadWorker.postMessage({ type: 'PAUSE' }));
@@ -132,7 +159,7 @@ function bindEvents() {
       });
   });
 
-  nodes.synthBtn.addEventListener('click', () => {
+  nodes.synthBtn.addEventListener('click', async () => {
     const startedAt = performance.now();
     nodes.synthStatus.textContent = 'Synthesis running…';
     nodes.synthBtn.disabled = true;
@@ -174,6 +201,9 @@ function bindEvents() {
         nodes.synthBtn.disabled = false;
         nodes.stopBtn.disabled = true;
       });
+    const text = nodes.inputText.value;
+    await savePrompt(text, nodes.modelSelect.value);
+    ttsWorker.postMessage({ type: 'SYNTHESIZE', payload: { text } });
 
     const interaction = Math.round(performance.now() - startedAt);
     if (interaction > FIRST_INTERACTION_TARGET_MS) {
@@ -205,7 +235,7 @@ function bindEvents() {
     if (!button) return;
 
     const rowId = Number(button.dataset.playId);
-    const rows = await getAll('history');
+    const rows = await getAll('synthesisHistory');
     const row = rows.find((entry) => entry.id === rowId);
     if (!row?.audioBlob) return;
 
@@ -217,7 +247,7 @@ function bindEvents() {
   });
 
   nodes.exportBtn.addEventListener('click', async () => {
-    const history = await getAll('history');
+    const history = await getAll('synthesisHistory');
     const safe = history.map((entry) => ({ ...entry, audioBlob: undefined, hasAudio: Boolean(entry.audioBlob) }));
     const blob = new Blob([JSON.stringify(safe, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -229,7 +259,7 @@ function bindEvents() {
   });
 
   nodes.clearHistoryBtn.addEventListener('click', async () => {
-    await clear('history');
+    await clear('synthesisHistory');
     await renderHistory();
   });
 }
@@ -245,7 +275,62 @@ function bindWorkers() {
     }
     if (type === 'COMPLETE') {
       nodes.downloadStatus.textContent = 'Model ready';
-      await put('downloads', { id: payload, updatedAt: new Date().toISOString(), ready: true });
+      await put('downloads', { id: payload.modelId, versionKey: payload.versionKey, updatedAt: new Date().toISOString(), ready: true });
+      await renderStorageEstimate();
+    }
+  };
+
+  ttsWorker.onmessage = async (event) => {
+    const { type, payload } = event.data;
+
+    if (type === 'MODEL_READY') {
+      nodes.modelStatus.textContent = `Model loaded in ${Math.round(payload.loadMs)}ms`;
+      nodes.loadModelBtn.disabled = false;
+      nodes.synthBtn.disabled = false;
+      return;
+    }
+
+    if (type === 'SYNTH_CANCELLED') {
+      nodes.synthStatus.textContent = 'Synthesis cancelled';
+      nodes.synthBtn.disabled = false;
+      nodes.stopBtn.disabled = true;
+      return;
+    }
+
+    if (type === 'SYNTH_COMPLETE') {
+      const durationSec = estimateSpeechDurationSeconds(nodes.inputText.value);
+      const { blob: audioBlob, stats } = createPseudoSpeechWavBlob(nodes.inputText.value, durationSec);
+
+      nodes.synthStatus.textContent = `Synthesis done in ${payload.totalSynthMs}ms`;
+      const asrTranscript = nodes.inputText.value;
+
+      await put('synthesisHistory', {
+        timestamp: new Date().toISOString(),
+        mode: payload.mode,
+        modelId: payload.modelId,
+        ttfaMs: payload.ttfaMs,
+        totalSynthMs: payload.totalSynthMs,
+        rtf: payload.rtf,
+        text: nodes.inputText.value,
+        audioBlob,
+        audioMimeType: 'audio/wav',
+        audioDurationSec: durationSec,
+        signalStats: stats,
+        asrTranscript
+      });
+
+      await saveBenchmarkRun({
+        timestamp: new Date().toISOString(),
+        modelId: payload.modelId,
+        ttfaMs: payload.ttfaMs,
+        totalSynthMs: payload.totalSynthMs,
+        rtf: payload.rtf,
+        textLength: nodes.inputText.value.length
+      });
+
+      await renderHistory();
+      nodes.synthBtn.disabled = false;
+      nodes.stopBtn.disabled = true;
     }
   };
 
@@ -256,12 +341,65 @@ function bindWorkers() {
 }
 
 async function renderHistory() {
-  const rows = (await getAll('history')).reverse().slice(0, 20);
+  const rows = (await getAll('synthesisHistory')).reverse().slice(0, 20);
   nodes.historyTable.innerHTML = rows
     .map((row) => `<tr><td>${row.timestamp}</td><td>${row.mode}</td><td>${row.modelId}</td><td>${row.ttfaMs}</td><td>${row.totalSynthMs}</td><td>${row.rtf}</td><td>${row.audioBlob ? `<button type="button" data-play-id="${row.id}">Play</button>` : '—'}</td></tr>`)
     .join('');
 }
 
+
+
+function queueModelDownload(model, type) {
+  const workerModel = {
+    ...model,
+    shards: model.shards.map((shard) => ({ ...shard, url: new URL(shard.url, window.location.href).toString() }))
+  };
+
+  nodes.downloadProgress.value = 0;
+  downloadWorker.postMessage({ type, payload: { model: workerModel } });
+}
+
+async function restoreSessionState() {
+  const [recentPrompts, benchmarkRuns] = await Promise.all([loadRecentPrompts(), loadRecentBenchmarkRuns()]);
+  const latestPrompt = recentPrompts[0];
+  if (latestPrompt?.text) {
+    nodes.inputText.value = latestPrompt.text;
+  }
+  if (latestPrompt?.modelId && Array.from(nodes.modelSelect.options).some((option) => option.value === latestPrompt.modelId)) {
+    nodes.modelSelect.value = latestPrompt.modelId;
+    nodes.downloadModel.value = latestPrompt.modelId;
+  }
+
+  if (benchmarkRuns[0]) {
+    nodes.synthStatus.textContent = `Restored ${benchmarkRuns.length} benchmark runs. Latest: ${benchmarkRuns[0].totalSynthMs}ms total.`;
+  }
+
+  await renderStorageEstimate();
+}
+
+async function renderStorageEstimate() {
+  const usage = await getModelCacheUsage();
+  const quota = await navigator.storage?.estimate?.();
+  const bytesUsed = usage.bytes;
+  const quotaBytes = quota?.quota || 0;
+  const usageBytes = quota?.usage || 0;
+  const pct = quotaBytes ? Math.round((usageBytes / quotaBytes) * 100) : null;
+  const modelList = usage.models.map((entry) => entry.modelId).join(', ') || 'none';
+  const versionLine = usage.models[0]?.versionKey ? ` (version ${usage.models[0].versionKey.slice(0, 8)}…)` : '';
+  nodes.storageStatus.textContent = `Model cache: ${formatBytes(bytesUsed)} across ${usage.shardCount} shard(s), models: ${modelList}${versionLine}. Browser storage: ${formatBytes(usageBytes)}${quotaBytes ? ` / ${formatBytes(quotaBytes)}${pct !== null ? ` (${pct}%)` : ''}` : ''}.`;
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  return `${value.toFixed(value >= 10 || idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
 
 async function transcribeAudio(audioInput) {
   if (typeof audioInput === 'string') {
@@ -276,7 +414,7 @@ async function transcribeAudio(audioInput) {
     return transcript;
   }
 
-  const rows = await getAll('history');
+  const rows = await getAll('synthesisHistory');
   const latest = rows.at(-1);
   if (latest?.asrTranscript) {
     return latest.asrTranscript;

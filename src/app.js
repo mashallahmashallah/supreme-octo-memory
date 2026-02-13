@@ -29,7 +29,9 @@ const nodes = {
 
 const downloadWorker = new Worker('./src/workers/download.worker.js', { type: 'module' });
 const ttsWorker = new Worker('./src/workers/tts.worker.js', { type: 'module' });
+
 let models = [];
+let activeModelId = null;
 
 init();
 
@@ -37,45 +39,65 @@ async function init() {
   nodes.capabilities.textContent = JSON.stringify(probeCapabilities(), null, 2);
   nodes.synthBtn.disabled = true;
   nodes.stopBtn.disabled = true;
+
   try {
-    models = await fetch('./public/models/manifest.json').then((r) => r.json());
+    const response = await fetch('./public/models/manifest.json');
+    models = await response.json();
+    if (!Array.isArray(models)) {
+      throw new Error('Manifest must be an array');
+    }
   } catch (error) {
     nodes.downloadStatus.textContent = `Unable to load model manifest: ${String(error)}`;
     return;
   }
+
   for (const model of models) {
-    nodes.downloadModel.add(new Option(`${model.name} (${model.sizeLabel})`, model.id));
-    nodes.modelSelect.add(new Option(`${model.name} (${model.sizeLabel})`, model.id));
+    const label = `${model.name} (${model.sizeLabel})`;
+    nodes.downloadModel.add(new Option(label, model.id));
+    nodes.modelSelect.add(new Option(label, model.id));
   }
+
   bindEvents();
   bindWorkers();
   await renderHistory();
   setupWebVitals();
-  registerServiceWorker();
+  await registerServiceWorker();
 }
 
 function bindEvents() {
   nodes.queueDownloadBtn.addEventListener('click', () => {
     const model = getSelectedModel(nodes.downloadModel.value);
+    if (!model) {
+      nodes.downloadStatus.textContent = 'No model selected';
+      return;
+    }
+    nodes.downloadProgress.value = 0;
     nodes.downloadStatus.textContent = `Queued ${model.name}`;
     downloadWorker.postMessage({ type: 'QUEUE', payload: { model } });
   });
+
   nodes.pauseDownloadBtn.addEventListener('click', () => downloadWorker.postMessage({ type: 'PAUSE' }));
   nodes.resumeDownloadBtn.addEventListener('click', () => downloadWorker.postMessage({ type: 'RESUME' }));
   nodes.cancelDownloadBtn.addEventListener('click', () => downloadWorker.postMessage({ type: 'CANCEL' }));
 
   nodes.loadModelBtn.addEventListener('click', () => {
-    const modelId = nodes.modelSelect.value;
+    activeModelId = nodes.modelSelect.value;
+    nodes.loadModelBtn.disabled = true;
     nodes.modelStatus.textContent = 'Model loading…';
-    ttsWorker.postMessage({ type: 'INIT_MODEL', payload: { modelId } });
+    ttsWorker.postMessage({ type: 'INIT_MODEL', payload: { modelId: activeModelId } });
   });
 
-  nodes.synthBtn.addEventListener('click', async () => {
+  nodes.synthBtn.addEventListener('click', () => {
     const startedAt = performance.now();
     nodes.synthStatus.textContent = 'Synthesis running…';
     nodes.synthBtn.disabled = true;
     nodes.stopBtn.disabled = false;
-    ttsWorker.postMessage({ type: 'SYNTHESIZE', payload: { text: nodes.inputText.value } });
+
+    ttsWorker.postMessage({
+      type: 'SYNTHESIZE',
+      payload: { text: nodes.inputText.value }
+    });
+
     const interaction = Math.round(performance.now() - startedAt);
     if (interaction > FIRST_INTERACTION_TARGET_MS) {
       nodes.synthStatus.textContent = `Synthesis running… (interaction slower than ${FIRST_INTERACTION_TARGET_MS}ms)`;
@@ -83,19 +105,18 @@ function bindEvents() {
   });
 
   nodes.stopBtn.addEventListener('click', () => {
-    nodes.synthStatus.textContent = 'Stop requested (simulated)';
-    nodes.stopBtn.disabled = true;
-    nodes.synthBtn.disabled = false;
+    nodes.synthStatus.textContent = 'Stopping synthesis…';
+    ttsWorker.postMessage({ type: 'CANCEL' });
   });
 
   nodes.exportBtn.addEventListener('click', async () => {
     const history = await getAll('history');
     const blob = new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tts-history-${Date.now()}.json`;
-    a.click();
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `tts-history-${Date.now()}.json`;
+    anchor.click();
     URL.revokeObjectURL(url);
   });
 
@@ -108,26 +129,46 @@ function bindEvents() {
 function bindWorkers() {
   downloadWorker.onmessage = async (event) => {
     const { type, payload } = event.data;
+
     if (type === 'STATUS') {
       nodes.downloadStatus.textContent = payload;
     }
+
     if (type === 'DETAILS') {
       nodes.downloadDetails.textContent = payload;
     }
+
     if (type === 'PROGRESS') {
       nodes.downloadProgress.value = payload.value;
       nodes.downloadDetails.textContent = payload.details;
     }
+
     if (type === 'COMPLETE') {
       nodes.downloadStatus.textContent = 'Model ready';
       await put('downloads', { id: payload, updatedAt: new Date().toISOString(), ready: true });
     }
+
+    if (type === 'CANCELLED') {
+      nodes.downloadStatus.textContent = 'Cancelled';
+      nodes.downloadDetails.textContent = 'Download cancelled by user';
+    }
+
+    if (type === 'ERROR') {
+      nodes.downloadStatus.textContent = 'Download failed';
+      nodes.downloadDetails.textContent = payload;
+    }
+  };
+
+  downloadWorker.onerror = (error) => {
+    nodes.downloadStatus.textContent = `Download worker error: ${error.message}`;
   };
 
   ttsWorker.onmessage = async (event) => {
     const { type, payload } = event.data;
+
     if (type === 'MODEL_READY') {
       nodes.modelStatus.textContent = `Model loaded in ${Math.round(payload.loadMs)}ms`;
+      nodes.loadModelBtn.disabled = false;
       nodes.synthBtn.disabled = false;
       await put('models', { id: payload.modelId, loadedAt: new Date().toISOString() });
     }
@@ -147,11 +188,25 @@ function bindWorkers() {
       nodes.synthBtn.disabled = false;
     }
 
+    if (type === 'SYNTH_CANCELLED') {
+      nodes.synthStatus.textContent = 'Synthesis cancelled';
+      nodes.stopBtn.disabled = true;
+      nodes.synthBtn.disabled = false;
+    }
+
     if (type === 'ERROR') {
       nodes.synthStatus.textContent = `Error: ${payload}`;
       nodes.stopBtn.disabled = true;
       nodes.synthBtn.disabled = false;
+      nodes.loadModelBtn.disabled = false;
     }
+  };
+
+  ttsWorker.onerror = (error) => {
+    nodes.synthStatus.textContent = `Synthesis worker error: ${error.message}`;
+    nodes.stopBtn.disabled = true;
+    nodes.synthBtn.disabled = false;
+    nodes.loadModelBtn.disabled = false;
   };
 }
 
@@ -165,7 +220,7 @@ async function renderHistory() {
 }
 
 function getSelectedModel(modelId) {
-  return models.find((m) => m.id === modelId);
+  return models.find((model) => model.id === modelId);
 }
 
 function setupWebVitals() {
@@ -194,6 +249,10 @@ function setupWebVitals() {
 
 async function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    await navigator.serviceWorker.register('./sw.js');
+    try {
+      await navigator.serviceWorker.register('./sw.js');
+    } catch (error) {
+      nodes.webVitals.textContent = `Service worker registration failed: ${String(error)}`;
+    }
   }
 }

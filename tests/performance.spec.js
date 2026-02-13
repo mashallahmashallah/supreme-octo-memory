@@ -51,3 +51,26 @@ test('simulated 3G: app remains responsive and LCP threshold is enforced in UI',
 
   await context.close();
 });
+
+test('synthesis can be cancelled without JS errors', async ({ page }) => {
+  const jsErrors = [];
+  page.on('pageerror', (error) => jsErrors.push(`pageerror: ${error.message}`));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') {
+      jsErrors.push(`console: ${msg.text()}`);
+    }
+  });
+
+  await page.goto('/index.html', { waitUntil: 'load' });
+  await page.click('#loadModelBtn');
+  await expect(page.locator('#modelStatus')).toContainText('Model loaded', { timeout: 3000 });
+
+  await page.fill('#inputText', 'This text is intentionally longer to allow cancellation before completion. '.repeat(40));
+  await page.click('#synthBtn');
+  await page.click('#stopBtn');
+
+  await expect(page.locator('#synthStatus')).toContainText('cancelled', { timeout: 2000 });
+  await expect(page.locator('#synthBtn')).toBeEnabled();
+  await expect(page.locator('#stopBtn')).toBeDisabled();
+  expect(jsErrors).toEqual([]);
+});

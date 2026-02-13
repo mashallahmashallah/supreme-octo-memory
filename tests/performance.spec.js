@@ -95,3 +95,28 @@ test('downloads can pause resume and complete without JS errors', async ({ page 
   expect(progress).toBeGreaterThanOrEqual(1);
   expect(jsErrors).toEqual([]);
 });
+
+test('generated audio persists after refresh and remains playable', async ({ page }) => {
+  const jsErrors = [];
+  page.on('pageerror', (error) => jsErrors.push(`pageerror: ${error.message}`));
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') {
+      jsErrors.push(`console: ${msg.text()}`);
+    }
+  });
+
+  await page.goto('/index.html', { waitUntil: 'load' });
+  await page.click('#loadModelBtn');
+  await expect(page.locator('#modelStatus')).toContainText('Model loaded', { timeout: 3000 });
+
+  await page.fill('#inputText', 'Persist this generated audio sample for playback.');
+  await page.click('#synthBtn');
+  await expect(page.locator('#synthStatus')).toContainText('Synthesis done', { timeout: 6000 });
+
+  await page.reload({ waitUntil: 'load' });
+  const playButton = page.locator('button[data-play-id]').first();
+  await expect(playButton).toBeVisible();
+  await playButton.click();
+  await expect(page.locator('#synthStatus')).toContainText('Playing saved audio', { timeout: 2000 });
+  expect(jsErrors).toEqual([]);
+});

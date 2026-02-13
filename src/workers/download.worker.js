@@ -1,3 +1,11 @@
+import {
+  cacheModelShard,
+  createModelVersionKey,
+  deleteStaleModelVersions,
+  getCachedModelShard,
+  putModelManifest
+} from '../storage/model-cache.js';
+
 const CHUNK_BYTES = 256 * 1024;
 
 let paused = false;
@@ -7,7 +15,7 @@ let activeModelId = null;
 self.onmessage = async (event) => {
   const { type, payload } = event.data;
 
-  if (type === 'QUEUE') {
+  if (type === 'QUEUE' || type === 'PRELOAD_MODEL') {
     if (activeModelId) {
       postMessage({ type: 'STATUS', payload: 'A download is already running' });
       return;
@@ -45,9 +53,7 @@ self.onmessage = async (event) => {
 
 async function waitIfPaused() {
   while (paused) {
-    if (cancelled) {
-      return false;
-    }
+    if (cancelled) return false;
     await sleep(150);
   }
   return true;
@@ -55,13 +61,16 @@ async function waitIfPaused() {
 
 async function downloadModel(model) {
   const total = model.shards.length;
-  const state = (await getDownloadState(model.id)) || { completedShards: [] };
-  const completed = new Set(state.completedShards || []);
+  const versionKey = await createModelVersionKey(model);
 
+  await deleteStaleModelVersions(model.id, versionKey);
   postMessage({ type: 'STATUS', payload: `Downloading ${model.name}...` });
 
   for (let i = 0; i < total; i += 1) {
-    if (completed.has(i)) {
+    const shard = model.shards[i];
+    const cached = await getCachedModelShard({ modelId: model.id, versionKey, shardIndex: i });
+
+    if (cached) {
       postMessage({
         type: 'PROGRESS',
         payload: {
@@ -88,11 +97,17 @@ async function downloadModel(model) {
     postMessage({ type: 'DETAILS', payload: `Fetching shard ${i + 1}/${total}` });
 
     try {
-      const buffer = await fetchShardWithRange(model.shards[i].url);
-      await verifyShardChecksum(model.shards[i], buffer);
-      completed.add(i);
-      await putDownloadState(model.id, { completedShards: Array.from(completed).sort((a, b) => a - b) });
-      await sleep(100);
+      const buffer = await fetchShardWithRange(shard.url);
+      await verifyShardChecksum(shard, buffer);
+      await cacheModelShard({
+        modelId: model.id,
+        versionKey,
+        shardIndex: i,
+        shardUrl: shard.url,
+        sha256: shard.sha256,
+        data: buffer
+      });
+      await sleep(75);
     } catch (error) {
       postMessage({ type: 'STATUS', payload: 'Download error' });
       postMessage({ type: 'ERROR', payload: String(error) });
@@ -108,8 +123,8 @@ async function downloadModel(model) {
     });
   }
 
-  await clearDownloadState(model.id);
-  postMessage({ type: 'COMPLETE', payload: model.id });
+  await putModelManifest(model, versionKey);
+  postMessage({ type: 'COMPLETE', payload: { modelId: model.id, versionKey } });
 }
 
 async function fetchShardWithRange(url) {
@@ -118,14 +133,10 @@ async function fetchShardWithRange(url) {
   const chunks = [];
 
   while (totalBytes === null || offset < totalBytes) {
-    if (cancelled) {
-      throw new Error('Cancelled');
-    }
+    if (cancelled) throw new Error('Cancelled');
 
     const canContinue = await waitIfPaused();
-    if (!canContinue) {
-      throw new Error('Cancelled');
-    }
+    if (!canContinue) throw new Error('Cancelled');
 
     const endByte = offset + CHUNK_BYTES - 1;
     const response = await fetch(url, {
@@ -141,9 +152,7 @@ async function fetchShardWithRange(url) {
 
     if (contentRange) {
       const match = contentRange.match(/bytes\s+(\d+)-(\d+)\/(\d+)/i);
-      if (match) {
-        totalBytes = Number(match[3]);
-      }
+      if (match) totalBytes = Number(match[3]);
     } else if (response.status === 200) {
       totalBytes = contentLength;
     }
@@ -152,22 +161,15 @@ async function fetchShardWithRange(url) {
     chunks.push(chunk);
     offset += chunk.byteLength;
 
-    if (response.status === 200 && totalBytes !== null) {
-      break;
-    }
-
-    if (chunk.byteLength === 0) {
-      break;
-    }
+    if (response.status === 200 && totalBytes !== null) break;
+    if (chunk.byteLength === 0) break;
   }
 
   return concatArrayBuffers(chunks);
 }
 
 async function verifyShardChecksum(shard, arrayBuffer) {
-  if (!shard.sha256 || shard.sha256 === 'dev') {
-    return;
-  }
+  if (!shard.sha256 || shard.sha256 === 'dev') return;
 
   const digest = await crypto.subtle.digest('SHA-256', arrayBuffer);
   const hex = Array.from(new Uint8Array(digest))
@@ -192,48 +194,4 @@ function concatArrayBuffers(chunks) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function openStateDb() {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open('tts-download-state', 1);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains('states')) {
-        db.createObjectStore('states', { keyPath: 'id' });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function getDownloadState(id) {
-  const db = await openStateDb();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction('states', 'readonly');
-    const req = tx.objectStore('states').get(id);
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function putDownloadState(id, value) {
-  const db = await openStateDb();
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction('states', 'readwrite');
-    tx.objectStore('states').put({ id, ...value, updatedAt: Date.now() });
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-async function clearDownloadState(id) {
-  const db = await openStateDb();
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction('states', 'readwrite');
-    tx.objectStore('states').delete(id);
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
-  });
 }

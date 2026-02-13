@@ -31,6 +31,9 @@
         <label for="downloadModel">Model</label>
         <select id="downloadModel"></select>
         <button id="queueDownloadBtn" type="button">Queue background download</button>
+        <button id="preloadModelBtn" type="button">Preload model</button>
+        <button id="deleteModelCacheBtn" type="button">Delete model cache</button>
+        <button id="storageEstimateBtn" type="button">Estimate storage</button>
         <button id="pauseDownloadBtn" type="button">Pause</button>
         <button id="resumeDownloadBtn" type="button">Resume</button>
         <button id="cancelDownloadBtn" type="button">Cancel</button>
@@ -38,6 +41,7 @@
       <p class="status" id="downloadStatus">Idle</p>
       <progress id="downloadProgress" max="1" value="0"></progress>
       <p id="downloadDetails"></p>
+      <p id="storageStatus">Model cache usage unavailable.</p>
     </section>
 
     <section>

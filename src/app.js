@@ -177,7 +177,7 @@ function bindEvents() {
         nodes.synthStatus.textContent = `Synthesis done in ${payload.totalSynthMs}ms`;
         const asrTranscript = nodes.inputText.value;
 
-        await put('history', {
+        const historyRow = {
           timestamp: new Date().toISOString(),
           mode: payload.mode,
           modelId: payload.modelId,
@@ -190,6 +190,20 @@ function bindEvents() {
           audioDurationSec: durationSec,
           signalStats: stats,
           asrTranscript
+        };
+
+        await Promise.all([
+          put('synthesisHistory', historyRow),
+          put('history', historyRow)
+        ]);
+
+        await saveBenchmarkRun({
+          timestamp: new Date().toISOString(),
+          modelId: payload.modelId,
+          ttfaMs: payload.ttfaMs,
+          totalSynthMs: payload.totalSynthMs,
+          rtf: payload.rtf,
+          textLength: nodes.inputText.value.length
         });
 
         await renderHistory();
@@ -203,8 +217,6 @@ function bindEvents() {
       });
     const text = nodes.inputText.value;
     await savePrompt(text, nodes.modelSelect.value);
-    ttsWorker.postMessage({ type: 'SYNTHESIZE', payload: { text } });
-
     const interaction = Math.round(performance.now() - startedAt);
     if (interaction > FIRST_INTERACTION_TARGET_MS) {
       nodes.synthStatus.textContent = `Synthesis running… (interaction slower than ${FIRST_INTERACTION_TARGET_MS}ms)`;
@@ -277,60 +289,6 @@ function bindWorkers() {
       nodes.downloadStatus.textContent = 'Model ready';
       await put('downloads', { id: payload.modelId, versionKey: payload.versionKey, updatedAt: new Date().toISOString(), ready: true });
       await renderStorageEstimate();
-    }
-  };
-
-  ttsWorker.onmessage = async (event) => {
-    const { type, payload } = event.data;
-
-    if (type === 'MODEL_READY') {
-      nodes.modelStatus.textContent = `Model loaded in ${Math.round(payload.loadMs)}ms`;
-      nodes.loadModelBtn.disabled = false;
-      nodes.synthBtn.disabled = false;
-      return;
-    }
-
-    if (type === 'SYNTH_CANCELLED') {
-      nodes.synthStatus.textContent = 'Synthesis cancelled';
-      nodes.synthBtn.disabled = false;
-      nodes.stopBtn.disabled = true;
-      return;
-    }
-
-    if (type === 'SYNTH_COMPLETE') {
-      const durationSec = estimateSpeechDurationSeconds(nodes.inputText.value);
-      const { blob: audioBlob, stats } = createPseudoSpeechWavBlob(nodes.inputText.value, durationSec);
-
-      nodes.synthStatus.textContent = `Synthesis done in ${payload.totalSynthMs}ms`;
-      const asrTranscript = nodes.inputText.value;
-
-      await put('synthesisHistory', {
-        timestamp: new Date().toISOString(),
-        mode: payload.mode,
-        modelId: payload.modelId,
-        ttfaMs: payload.ttfaMs,
-        totalSynthMs: payload.totalSynthMs,
-        rtf: payload.rtf,
-        text: nodes.inputText.value,
-        audioBlob,
-        audioMimeType: 'audio/wav',
-        audioDurationSec: durationSec,
-        signalStats: stats,
-        asrTranscript
-      });
-
-      await saveBenchmarkRun({
-        timestamp: new Date().toISOString(),
-        modelId: payload.modelId,
-        ttfaMs: payload.ttfaMs,
-        totalSynthMs: payload.totalSynthMs,
-        rtf: payload.rtf,
-        textLength: nodes.inputText.value.length
-      });
-
-      await renderHistory();
-      nodes.synthBtn.disabled = false;
-      nodes.stopBtn.disabled = true;
     }
   };
 
@@ -568,20 +526,36 @@ function writeAscii(view, offset, text) {
 }
 
 function setupWebVitals() {
+  let hasLcpValue = false;
+  const setLcpText = (lcpMs, reason = '') => {
+    hasLcpValue = true;
+    const suffix = reason ? ` (${reason})` : '';
+    nodes.webVitals.textContent = `LCP: ${lcpMs}ms (target <= ${LCP_THRESHOLD_MS}ms on simulated 3G)${suffix}`;
+  };
+
   const lcpObserver = new PerformanceObserver((entryList) => {
     const entries = entryList.getEntries();
     const last = entries.at(-1);
     if (!last) return;
 
     const lcpMs = Math.round(last.startTime);
-    nodes.webVitals.textContent = `LCP: ${lcpMs}ms (target <= ${LCP_THRESHOLD_MS}ms on simulated 3G)`;
+    setLcpText(lcpMs);
   });
 
   try {
     lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
   } catch {
     nodes.webVitals.textContent = 'LCP observer unavailable in this browser';
+    return;
   }
+
+  window.setTimeout(() => {
+    if (hasLcpValue) return;
+    const paintEntries = performance.getEntriesByType('paint');
+    const firstContentfulPaint = paintEntries.find((entry) => entry.name === 'first-contentful-paint');
+    const fallbackMs = Math.round(firstContentfulPaint?.startTime || 0);
+    setLcpText(fallbackMs, 'fallback from first-contentful-paint');
+  }, 1200);
 }
 
 async function registerServiceWorker() {

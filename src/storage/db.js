@@ -1,7 +1,8 @@
 const DB_NAME = 'tts-lab';
-const DB_VERSION = 2;
+const DB_VERSION = 1;
 
 const STORES = {
+  history: { keyPath: 'id', autoIncrement: true },
   synthesisHistory: { keyPath: 'id', autoIncrement: true },
   modelCache: { keyPath: 'id' },
   modelManifests: { keyPath: 'id' },

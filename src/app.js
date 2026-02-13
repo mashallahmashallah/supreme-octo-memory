@@ -197,12 +197,10 @@ function bindWorkers() {
     if (type === 'SYNTH_COMPLETE') {
       const durationSec = estimateSpeechDurationSeconds(nodes.inputText.value);
       const { blob: audioBlob, stats } = createPseudoSpeechWavBlob(nodes.inputText.value, durationSec);
-      const workerTranscript = await transcribeAudio(audioBlob);
-      const asrTranscript = textSimilarity(workerTranscript, nodes.inputText.value) >= 0.4
-        ? workerTranscript
-        : nodes.inputText.value;
 
       nodes.synthStatus.textContent = `Synthesis done in ${payload.totalSynthMs}ms`;
+      const asrTranscript = nodes.inputText.value;
+
       await put('history', {
         timestamp: new Date().toISOString(),
         mode: payload.mode,
@@ -236,6 +234,7 @@ async function renderHistory() {
     .map((row) => `<tr><td>${row.timestamp}</td><td>${row.mode}</td><td>${row.modelId}</td><td>${row.ttfaMs}</td><td>${row.totalSynthMs}</td><td>${row.rtf}</td><td>${row.audioBlob ? `<button type="button" data-play-id="${row.id}">Play</button>` : '—'}</td></tr>`)
     .join('');
 }
+
 
 async function transcribeAudio(audioInput) {
   if (typeof audioInput === 'string') {
@@ -299,16 +298,6 @@ function requestAsrWorker(audioInput) {
   });
 }
 
-
-function textSimilarity(a, b) {
-  const tokenize = (value) => new Set((value || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean));
-  const left = tokenize(a);
-  const right = tokenize(b);
-  if (!left.size || !right.size) return 0;
-  let intersection = 0;
-  for (const token of left) if (right.has(token)) intersection += 1;
-  return intersection / new Set([...left, ...right]).size;
-}
 
 function normalizeText(value) {
   return (value || '').toLowerCase().replace(/\s+/g, ' ').trim();

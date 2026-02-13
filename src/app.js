@@ -423,8 +423,32 @@ async function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
 
   try {
-    await navigator.serviceWorker.register('./sw.js');
+    const buildId = await resolveBuildId();
+    const registration = await navigator.serviceWorker.register(`./sw.js?build=${encodeURIComponent(buildId)}`);
+    if (registration.waiting) {
+      registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+    }
+    registration.addEventListener('updatefound', () => {
+      const worker = registration.installing;
+      if (!worker) return;
+      worker.addEventListener('statechange', () => {
+        if (worker.state === 'installed' && navigator.serviceWorker.controller) {
+          nodes.webVitals.textContent = `${nodes.webVitals.textContent} • Update available (refresh to apply).`;
+        }
+      });
+    });
   } catch (error) {
     nodes.webVitals.textContent = `Service worker registration failed: ${String(error)}`;
+  }
+}
+
+async function resolveBuildId() {
+  try {
+    const response = await fetch('./build.json', { cache: 'no-store' });
+    if (!response.ok) throw new Error(`build.json status ${response.status}`);
+    const data = await response.json();
+    return String(data.buildId || 'dev');
+  } catch {
+    return `dev-${Date.now()}`;
   }
 }

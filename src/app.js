@@ -73,7 +73,14 @@ function bindEvents() {
     }
     nodes.downloadProgress.value = 0;
     nodes.downloadStatus.textContent = `Queued ${model.name}`;
-    downloadWorker.postMessage({ type: 'QUEUE', payload: { model } });
+    const workerModel = {
+      ...model,
+      shards: model.shards.map((shard) => ({
+        ...shard,
+        url: new URL(shard.url, window.location.href).toString()
+      }))
+    };
+    downloadWorker.postMessage({ type: 'QUEUE', payload: { model: workerModel } });
   });
 
   nodes.pauseDownloadBtn.addEventListener('click', () => downloadWorker.postMessage({ type: 'PAUSE' }));

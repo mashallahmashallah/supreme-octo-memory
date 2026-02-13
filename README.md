@@ -12,6 +12,12 @@ npm run start
 
 Open http://127.0.0.1:4173/index.html.
 
-## Notes
-- Model artifacts are represented with placeholder shards under `public/models` in this iteration.
-- The app is static and suitable for GitHub Pages deployment.
+## Current status
+- Download worker supports pause/resume/cancel, shard-level resumable progress, and checksum verification.
+- Synthesis worker supports cancellation and error-safe UI state transitions.
+- CI enforces simulated 3G performance checks and JS-error-free flows.
+- Model artifacts are still placeholders under `public/models` in this iteration.
+
+## Backlog tracking
+- GitHub Project: https://github.com/users/mashallahmashallah/projects/1
+- Milestone-driven issues track remaining work (WebGPU runtime, AudioWorklet streaming, Safari device runs, real model artifacts).

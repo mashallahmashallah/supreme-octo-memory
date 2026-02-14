@@ -144,9 +144,10 @@ function bindEvents() {
         }
       })
       .then((result) => {
+        const providerText = result.executionProvider ? ` [provider: ${result.executionProvider}]` : '';
         nodes.modelStatus.textContent = result.warning
-          ? `Model loaded with warning: ${result.warning}`
-          : `Model loaded: ${result.name}`;
+          ? `Model loaded with warning: ${result.warning}${providerText}`
+          : `Model loaded: ${result.name}${providerText}`;
         nodes.loadModelBtn.disabled = false;
         nodes.synthBtn.disabled = false;
         nodes.stopBtn.disabled = true;

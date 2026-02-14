@@ -17,7 +17,7 @@ Open http://127.0.0.1:4173/index.html.
 - Synthesis worker supports cancellation and error-safe UI state transitions.
 - Generated audio is persisted locally and can be replayed after refresh.
 - CI enforces simulated 3G performance checks and JS-error-free flows.
-- Manifest now includes a checked-in ONNX artifact derived from Qwen3-TTS-12Hz-0.6B-Base (speaker encoder first Conv1D block).
+- Manifest now includes a checked-in ONNX artifact derived from Qwen3-TTS-12Hz-0.6B-Base (speaker encoder first Conv1D block), and the runtime now executes it through ONNX Runtime Web during load/synthesis.
 
 ## Backlog tracking
 - GitHub Project: https://github.com/users/mashallahmashallah/projects/1

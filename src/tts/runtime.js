@@ -169,13 +169,15 @@ async function createOnnxSession(onnxArrayBuffer) {
     throw new Error('ONNX Runtime Web is unavailable. Ensure ort.min.js is loaded.');
   }
 
-  const providers = navigator.gpu ? ['webgpu', 'wasm'] : ['wasm'];
+  const webgpuOptIn = new URLSearchParams(window.location.search).get('onnxWebgpu') === '1';
+  const useWebgpu = webgpuOptIn && Boolean(navigator.gpu);
+  const executionProvider = useWebgpu ? 'webgpu' : 'wasm';
+
   const session = await globalThis.ort.InferenceSession.create(onnxArrayBuffer, {
-    executionProviders: providers,
+    executionProviders: [executionProvider],
     graphOptimizationLevel: 'all'
   });
 
-  const executionProvider = navigator.gpu ? 'webgpu-or-wasm' : 'wasm';
   return { session, executionProvider };
 }
 

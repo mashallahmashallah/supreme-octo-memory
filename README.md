@@ -33,3 +33,5 @@ Open http://127.0.0.1:4173/index.html.
 - Added `scripts/convert_qwen3_tts_to_onnx.py` to convert Qwen3-TTS safetensors weights into a compatible ONNX graph for the speaker encoder's first Conv1D stage (subset conversion).
 - Generated ONNX artifact: `public/models/qwen3-tts-12hz-0.6b-base-onnx/speaker_encoder_conv.onnx`.
 - Verified with `onnx.checker` and `onnxruntime` inference on random input.
+
+- ONNX Runtime defaults to WASM for reliability in CI/mobile; enable WebGPU provider explicitly via `?onnxWebgpu=1` on supported browsers.

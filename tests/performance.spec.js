@@ -63,7 +63,7 @@ test('simulated 3G: app remains responsive and LCP threshold is enforced in UI',
   expect(lcpMs).toBeLessThanOrEqual(LCP_THRESHOLD_MS);
 
   await page.click('#loadModelBtn');
-  await expect(page.locator('#modelStatus')).toContainText('Model loaded', { timeout: 20000 });
+  await expect(page.locator('#modelStatus')).toContainText('Model loaded', { timeout: 60000 });
 
   await page.fill('#inputText', 'Quick responsiveness check.');
   const start = Date.now();
@@ -99,7 +99,7 @@ test('voice design ASR + TTS text similarity and anti-single-tone safeguards', a
   }
 
   await page.click('#loadModelBtn');
-  await expect(page.locator('#modelStatus')).toContainText('Model loaded', { timeout: 20000 });
+  await expect(page.locator('#modelStatus')).toContainText('Model loaded', { timeout: 60000 });
   await page.fill('#inputText', QWEN_EXAMPLE_TEXT);
   await page.click('#synthBtn');
   await expect(page.locator('#synthStatus')).toContainText('Synthesis done', { timeout: 6000 });

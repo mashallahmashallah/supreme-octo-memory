@@ -174,10 +174,15 @@ async function createOnnxSession(onnxArrayBuffer) {
 
   for (const provider of providers) {
     try {
-      const session = await globalThis.ort.InferenceSession.create(onnxArrayBuffer, {
-        executionProviders: [provider],
-        graphOptimizationLevel: 'all'
-      });
+      const timeoutMs = provider === 'webgpu' ? 2500 : 12000;
+      const session = await promiseWithTimeout(
+        globalThis.ort.InferenceSession.create(onnxArrayBuffer, {
+          executionProviders: [provider],
+          graphOptimizationLevel: 'all'
+        }),
+        timeoutMs,
+        `Timed out initializing ONNX provider '${provider}' after ${timeoutMs}ms`
+      );
       return { session, executionProvider: provider };
     } catch (error) {
       lastError = error;
@@ -185,6 +190,22 @@ async function createOnnxSession(onnxArrayBuffer) {
   }
 
   throw new Error(`Failed to initialize ONNX session (${providers.join(' -> ')}): ${String(lastError)}`);
+}
+
+
+function promiseWithTimeout(promise, timeoutMs, message) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
 }
 
 function makePseudoInput(text) {

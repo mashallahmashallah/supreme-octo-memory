@@ -7,6 +7,7 @@ const MODEL_CONFIG = {
 export function detectRuntimeSupport() {
   const features = {
     onnxRuntime: Boolean(globalThis.ort?.InferenceSession),
+    webgpu: Boolean(navigator.gpu),
     worker: typeof Worker !== 'undefined',
     audioWorklet: typeof AudioWorkletNode !== 'undefined',
     indexedDb: typeof indexedDB !== 'undefined'
@@ -96,7 +97,7 @@ export function createTtsRuntime({ manifest }) {
     }
 
     onProgress?.({ phase: 'onnx', message: 'Creating ONNX runtime session…', progress: 0.92, warning });
-    const onnxSession = await createOnnxSession(onnxBuffer);
+    const { session: onnxSession, executionProvider } = await createOnnxSession(onnxBuffer);
 
     // warmup run confirms the model is executable in-browser
     const warmupInputName = onnxSession.inputNames[0];
@@ -110,7 +111,8 @@ export function createTtsRuntime({ manifest }) {
       onnxSession,
       onnxInputName: warmupInputName,
       loadedAt: Date.now(),
-      warning
+      warning,
+      executionProvider
     };
 
     onProgress?.({ phase: 'ready', message: `${displayName} ready`, progress: 1, warning });
@@ -167,10 +169,22 @@ async function createOnnxSession(onnxArrayBuffer) {
     throw new Error('ONNX Runtime Web is unavailable. Ensure ort.min.js is loaded.');
   }
 
-  return globalThis.ort.InferenceSession.create(onnxArrayBuffer, {
-    executionProviders: ['wasm'],
-    graphOptimizationLevel: 'all'
-  });
+  const providers = navigator.gpu ? ['webgpu', 'wasm'] : ['wasm'];
+  let lastError = null;
+
+  for (const provider of providers) {
+    try {
+      const session = await globalThis.ort.InferenceSession.create(onnxArrayBuffer, {
+        executionProviders: [provider],
+        graphOptimizationLevel: 'all'
+      });
+      return { session, executionProvider: provider };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(`Failed to initialize ONNX session (${providers.join(' -> ')}): ${String(lastError)}`);
 }
 
 function makePseudoInput(text) {
